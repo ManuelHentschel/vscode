@@ -279,7 +279,6 @@ export class Repl extends FilterViewPane implements IHistoryNavigationWidget {
 							const response = await session.completions(frameId, focusedStackFrame?.thread.threadId || 0, text, position, token);
 
 							const suggestions: CompletionItem[] = [];
-							const computeRange = (length: number) => Range.fromPositions(position.delta(0, -length), position);
 							if (response && response.body && response.body.targets) {
 								response.body.targets.forEach(item => {
 									if (item && item.label) {
@@ -296,12 +295,20 @@ export class Repl extends FilterViewPane implements IHistoryNavigationWidget {
 										const label: string | CompletionItemLabel = item.detail
 											? { label: item.label, description: item.detail }
 											: item.label;
+										const length = item.length ?? 0;
+										// DAP deviation: in vscode, item.start is interpreted as 0-based index, rather than using `columnsStartAt1`
+										// DAP unclear about this: if item.start not specified, position - length is used in vscode, rather than position
+										const start = item.start ?? model.getOffsetAt(position) - length;
+										const range = Range.fromPositions(
+											model.getPositionAt(start),
+											model.getPositionAt(start + length)
+										);
 										suggestions.push({
 											label,
 											insertText,
 											kind: CompletionItemKinds.fromString(item.type || 'property'),
-											filterText: (item.start && item.length) ? text.substring(item.start, item.start + item.length).concat(item.label) : undefined,
-											range: computeRange(item.length || 0),
+											filterText: (item.start !== undefined && length) ? text.substring(start, start + length).concat(item.label) : undefined,
+											range,
 											sortText: item.sortText,
 											insertTextRules
 										});
@@ -312,11 +319,11 @@ export class Repl extends FilterViewPane implements IHistoryNavigationWidget {
 							if (this.configurationService.getValue<IDebugConfiguration>('debug').console.historySuggestions) {
 								const history = this.history.getHistory();
 								const idxLength = String(history.length).length;
-								history.forEach((h, i) => suggestions.push({
+								history.filter(h => !!h).forEach((h, i) => suggestions.push({
 									label: h,
 									insertText: h,
 									kind: CompletionItemKind.Text,
-									range: computeRange(h.length),
+									range: Range.fromPositions(model.getPositionAt(model.getOffsetAt(position) - h.length), position),
 									sortText: 'ZZZ' + String(history.length - i).padStart(idxLength, '0')
 								}));
 							}
